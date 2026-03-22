@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPECTRUM v7</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Courier+Prime&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#000; overflow:hidden; width:100vw; height:100vh; }
+  canvas { position:fixed; top:0; left:0; width:100%; height:100%; }
+  #ui {
+    position:fixed; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; z-index:10;
+    transition:opacity 1s;
+  }
+  #ui.hidden { opacity:0; pointer-events:none; }
+  h1 {
+    font-family:'Bebas Neue',sans-serif;
+    font-size:clamp(48px,11vw,120px);
+    letter-spacing:.3em; color:#fff; line-height:1;
+    text-shadow:0 0 60px rgba(255,255,255,.08);
+  }
+  .sub {
+    font-family:'Courier Prime',monospace;
+    font-size:10px; letter-spacing:.35em;
+    text-transform:uppercase; color:#333;
+  }
+  #startBtn, #sysBtn {
+    font-family:'Courier Prime',monospace; font-size:11px;
+    letter-spacing:.3em; text-transform:uppercase;
+    padding:13px 40px; background:transparent;
+    border:1px solid #555; color:#777; cursor:pointer; transition:all .3s;
+    display:block; width:260px; text-align:center;
+  }
+  #startBtn:hover, #sysBtn:hover { border-color:#fff; color:#fff; }
+  #sysBtn { border-color:#333; color:#444; }
+  #stopBtn {
+    position:fixed; top:22px; right:22px;
+    font-family:'Courier Prime',monospace; font-size:9px;
+    letter-spacing:.3em; text-transform:uppercase;
+    padding:7px 18px; background:transparent;
+    border:1px solid #1a1a1a; color:#2a2a2a; cursor:pointer;
+    display:none; z-index:20; transition:all .25s;
+  }
+  #stopBtn:hover { border-color:#666; color:#666; }
+  #sourceLabel {
+    position:fixed; top:22px; left:50%; transform:translateX(-50%);
+    font-family:'Courier Prime',monospace; font-size:8px;
+    letter-spacing:.3em; text-transform:uppercase;
+    color:#222; z-index:20; display:none;
+  }
+    position:fixed; bottom:20px; right:22px;
+    font-family:'Courier Prime',monospace; font-size:8px;
+    letter-spacing:.3em; text-transform:uppercase; color:#111; z-index:20;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>SPECTRUM</h1>
+  <p class="sub">Audio Reactive</p>
+  <button id="startBtn">🎙 Microphone</button>
+  <button id="sysBtn" style="margin-top:-4px;">💻 System / Tab Audio</button>
+  <p class="sub" style="font-size:8px;color:#1a1a1a;max-width:280px;text-align:center;line-height:2.2;">
+    System audio: share screen → tick "Share tab audio" or "Share system audio"
+  </p>
+</div>
+<button id="stopBtn">✕ Stop</button>
+<div id="sourceLabel"></div>
+<div id="version">spectrum v7</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  SPECTRUM v1
+//  Layout:
+//    - Centre column = current spectrum frame (1px wide)
+//    - Left half  = history scrolling outward to the left  (mirrored)
+//    - Right half = history scrolling outward to the right
+//
+//  Y axis = frequency (log scale, low at bottom, high at top)
+//  X axis = time (centre = now, edges = past)
+//  Brightness = intensity
+//
+//  Each frame we:
+//    1. Compute the new spectrum column
+//    2. Draw it at the centre
+//    3. Shift the right half one pixel right
+//    4. Shift the left half one pixel left (mirror of right)
+// ════════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+let W, H, CX;
+
+let running = false, raf, time = 0;
+let audioCtx, analyser, dataArray, stream;
+
+// Off-screen buffer — we maintain the full pixel history here
+// and blit to main canvas each frame
+let offCanvas, offCtx, offData;
+
+function initBuffers() {
+  offCanvas        = document.createElement('canvas');
+  offCanvas.width  = W;
+  offCanvas.height = H;
+  offCtx           = offCanvas.getContext('2d');
+  offCtx.fillStyle = '#000';
+  offCtx.fillRect(0, 0, W, H);
+  offData = offCtx.getImageData(0, 0, W, H);
+}
+
+function resize() {
+  W  = canvas.width  = window.innerWidth;
+  H  = canvas.height = window.innerHeight;
+  CX = Math.floor(W / 2);
+  if (running) initBuffers();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Color mapping ─────────────────────────────────────────────────
+// Maps intensity 0..1 → RGB
+// Silence = black, low = deep blue, mid = cyan/green, loud = white
+// This gives an intuitive "heat" feel while staying elegant
+function intensityToRGB(v) {
+  // 5-stop gradient:
+  // 0.00 → black        (0,0,0)
+  // 0.20 → deep blue    (0,20,120)
+  // 0.45 → cyan-teal    (0,180,200)
+  // 0.70 → bright white-blue (180,230,255)
+  // 1.00 → pure white   (255,255,255)
+  const stops = [
+    { t:0.00, r:0,   g:0,   b:0   },
+    { t:0.20, r:0,   g:20,  b:120 },
+    { t:0.45, r:0,   g:180, b:200 },
+    { t:0.70, r:180, g:230, b:255 },
+    { t:1.00, r:255, g:255, b:255 },
+  ];
+
+  v = Math.max(0, Math.min(1, v));
+  let i = 0;
+  while (i < stops.length - 2 && v > stops[i+1].t) i++;
+  const a = stops[i], b = stops[i+1];
+  const s = (v - a.t) / (b.t - a.t);
+  return [
+    Math.round(a.r + s * (b.r - a.r)),
+    Math.round(a.g + s * (b.g - a.g)),
+    Math.round(a.b + s * (b.b - a.b)),
+  ];
+}
+
+// ── Perceptual frequency weighting ───────────────────────────────
+// Bass (sub-500 Hz) is naturally very loud in most music.
+// We apply a gentle roll-off below 500 Hz and a slight boost above 2k
+// so the full spectrum is visually balanced.
+// Returns a multiplier 0..1 for a given frequency in Hz.
+function freqWeight(hz) {
+  const logMin = Math.log10(20);
+  const logMax = Math.log10(20000);
+  const logHz  = Math.log10(Math.max(20, hz));
+  const t = (logHz - logMin) / (logMax - logMin);
+  // Steeper power curve: lows pulled down more aggressively
+  // t=0   (20 Hz)    → ~0.00
+  // t=0.3 (200 Hz)   → ~0.18
+  // t=0.4 (500 Hz)   → ~0.30
+  // t=0.6 (2 kHz)    → ~0.55
+  // t=0.8 (8 kHz)    → ~0.80
+  // t=1.0 (20 kHz)   → ~1.00
+  return Math.pow(t, 0.75);
+}
+
+// ── Build one spectrum column ─────────────────────────────────────
+// Returns a Uint8ClampedArray of length H*3 (r,g,b per row)
+// Y=0 → highest freq, Y=H-1 → lowest freq (log mapped)
+
+function buildColumn(dataArray, bufLen) {
+  const col    = new Uint8ClampedArray(H * 3);
+  const nyq    = audioCtx.sampleRate / 2;
+  const fpb    = nyq / bufLen;
+  const logMin = Math.log10(20);
+  const logMax = Math.log10(20000);
+
+  // Step 1: build a smooth magnitude array in linear bin space.
+  // Apply a Gaussian blur across bins so adjacent bins blend into each other.
+  const mag = new Float32Array(bufLen);
+  const BLUR_R = 3;
+  for (let i = 0; i < bufLen; i++) {
+    let sum = 0, wsum = 0;
+    for (let k = -BLUR_R; k <= BLUR_R; k++) {
+      const j = i + k;
+      if (j < 0 || j >= bufLen) continue;
+      const w = Math.exp(-0.5 * (k/BLUR_R) * (k/BLUR_R));
+      sum  += dataArray[j] * w;
+      wsum += w;
+    }
+    mag[i] = Math.pow((sum / wsum) / 255, 0.65);
+  }
+
+  // Step 2: for each screen pixel, map to a *fractional* bin index
+  // and use cubic Hermite interpolation between the four surrounding bins.
+  // This eliminates the staircase from pixels that land between integer bins.
+  function hermite(p0, p1, p2, p3, t) {
+    // Catmull-Rom spline
+    const m0 = (p2 - p0) * 0.5;
+    const m1 = (p3 - p1) * 0.5;
+    const t2 = t * t, t3 = t2 * t;
+    return (2*t3 - 3*t2 + 1)*p1
+         + (t3 - 2*t2 + t)*m0
+         + (-2*t3 + 3*t2)*p2
+         + (t3 - t2)*m1;
+  }
+
+  for (let y = 0; y < H; y++) {
+    const t   = 1 - y / H;   // 0=bottom (low freq), 1=top (high freq)
+    const hz  = Math.pow(10, logMin + t * (logMax - logMin));
+    const fbin = hz / fpb;   // fractional bin index
+
+    const i1 = Math.floor(fbin);
+    const tf  = fbin - i1;   // fractional part for interpolation
+
+    const clamp = i => Math.max(0, Math.min(bufLen - 1, i));
+    const p0 = mag[clamp(i1 - 1)];
+    const p1 = mag[clamp(i1)];
+    const p2 = mag[clamp(i1 + 1)];
+    const p3 = mag[clamp(i1 + 2)];
+
+    // Cubic interpolation
+    let val = hermite(p0, p1, p2, p3, tf);
+    val = Math.max(0, Math.min(1, val));
+
+    // Attenuate low frequencies so bass doesn't dominate the display
+    val *= freqWeight(hz);
+
+    // Additional brightness boost for highs — apply gamma < 1 above 2kHz
+    // This makes the high-frequency detail pop without touching the lows
+    const logHz = Math.log10(Math.max(20, hz));
+    const tHz   = (logHz - Math.log10(20)) / (Math.log10(20000) - Math.log10(20));
+    // Gamma interpolates from 1.0 (no boost at lows) → 0.55 (strong boost at highs)
+    const gamma = 1.0 - tHz * 0.45;
+    val = Math.pow(Math.max(0, val), gamma);
+    val = Math.max(0, Math.min(1, val));
+
+    const [r, g, b] = intensityToRGB(val);
+    col[y*3]   = r;
+    col[y*3+1] = g;
+    col[y*3+2] = b;
+  }
+
+  // Step 3: vertical Gaussian blur over the column pixels to smooth
+  // remaining discontinuities caused by the log mapping squashing high freqs.
+  const VBLUR = 2;
+  const smoothed = new Uint8ClampedArray(H * 3);
+  for (let y = 0; y < H; y++) {
+    let rS=0, gS=0, bS=0, wS=0;
+    for (let k = -VBLUR; k <= VBLUR; k++) {
+      const yy = y + k;
+      if (yy < 0 || yy >= H) continue;
+      const w = Math.exp(-0.5 * (k/VBLUR) * (k/VBLUR));
+      rS += col[yy*3]   * w;
+      gS += col[yy*3+1] * w;
+      bS += col[yy*3+2] * w;
+      wS += w;
+    }
+    smoothed[y*3]   = Math.round(rS / wS);
+    smoothed[y*3+1] = Math.round(gS / wS);
+    smoothed[y*3+2] = Math.round(bS / wS);
+  }
+
+  return smoothed;
+}
+
+// ── Write one column into offData at pixel x ──────────────────────
+function writeColumn(x, col) {
+  if (x < 0 || x >= W) return;
+  for (let y = 0; y < H; y++) {
+    const pi = (y * W + x) * 4;
+    offData.data[pi]   = col[y*3];
+    offData.data[pi+1] = col[y*3+1];
+    offData.data[pi+2] = col[y*3+2];
+    offData.data[pi+3] = 255;
+  }
+}
+
+// ── Read one column from offData at pixel x ───────────────────────
+function readColumn(x, out) {
+  if (x < 0 || x >= W) { out.fill(0); return; }
+  for (let y = 0; y < H; y++) {
+    const pi = (y * W + x) * 4;
+    out[y*3]   = offData.data[pi];
+    out[y*3+1] = offData.data[pi+1];
+    out[y*3+2] = offData.data[pi+2];
+  }
+}
+
+// ── Advance history one frame ─────────────────────────────────────
+// Right half: shift each column one pixel to the right
+// Left half:  shift each column one pixel to the left
+// Centre: write the new column to both CX and CX-1 (1px wide band)
+
+function advanceHistory(newCol) {
+  // We work directly on offData.data (flat RGBA array, row-major)
+  const d  = offData.data;
+  const bw = W * 4;  // bytes per row
+
+  // Shift RIGHT half: columns CX..W-1 move to CX+1..W
+  // Iterate right-to-left to avoid overwriting source
+  for (let y = 0; y < H; y++) {
+    const rowOff = y * W * 4;
+    for (let x = W - 1; x > CX; x--) {
+      const dst = rowOff + x * 4;
+      const src = rowOff + (x - 1) * 4;
+      d[dst]   = d[src];
+      d[dst+1] = d[src+1];
+      d[dst+2] = d[src+2];
+      d[dst+3] = 255;
+    }
+  }
+
+  // Shift LEFT half: columns 0..CX-1 move to 0..CX-2
+  // i.e. each column x gets value from x+1
+  // Iterate left-to-right
+  for (let y = 0; y < H; y++) {
+    const rowOff = y * W * 4;
+    for (let x = 0; x < CX; x++) {
+      const dst = rowOff + x * 4;
+      const src = rowOff + (x + 1) * 4;
+      d[dst]   = d[src];
+      d[dst+1] = d[src+1];
+      d[dst+2] = d[src+2];
+      d[dst+3] = 255;
+    }
+  }
+
+  // Write new column at centre (CX) and its mirror (CX-1)
+  writeColumn(CX,     newCol);
+  writeColumn(CX - 1, newCol);
+}
+
+// ── Y axis overlay ────────────────────────────────────────────────
+const FREQ_MARKS = [
+  { hz: 20,    label: '20 Hz'   },
+  { hz: 50,    label: '50'      },
+  { hz: 100,   label: '100'     },
+  { hz: 200,   label: '200'     },
+  { hz: 500,   label: '500'     },
+  { hz: 1000,  label: '1 kHz'   },
+  { hz: 2000,  label: '2k'      },
+  { hz: 5000,  label: '5k'      },
+  { hz: 10000, label: '10k'     },
+  { hz: 20000, label: '20 kHz'  },
+];
+
+function drawYAxis() {
+  const logMin = Math.log10(20);
+  const logMax = Math.log10(20000);
+
+  ctx.save();
+  ctx.font      = '10px "Courier Prime", monospace';
+  ctx.textAlign = 'left';
+
+  for (const mark of FREQ_MARKS) {
+    const t = (Math.log10(mark.hz) - logMin) / (logMax - logMin);
+    const y = Math.round((1 - t) * H);
+
+    // Horizontal tick lines across full width — very subtle
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth   = 0.5;
+    ctx.setLineDash([3, 6]);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label on the left — with a small dark backing rect for readability
+    const label  = mark.label;
+    const metrics = ctx.measureText(label);
+    const lx     = 10;
+    const ly     = y;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(lx - 2, ly - 10, metrics.width + 6, 13);
+
+    ctx.fillStyle = 'rgba(200,200,200,0.75)';
+    ctx.fillText(label, lx, ly);
+
+    // Small tick mark on left edge
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(6, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ── Color + intensity legend ──────────────────────────────────────
+function drawLegend() {
+  const LW   = 16;    // gradient bar width
+  const LH   = 160;   // gradient bar height
+  const LX   = W - 54; // right side
+  const LY   = H / 2 - LH / 2;
+
+  ctx.save();
+
+  // Background backing
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(LX - 8, LY - 22, LW + 50, LH + 44);
+
+  // Title
+  ctx.font      = '8px "Courier Prime", monospace';
+  ctx.fillStyle = 'rgba(160,160,160,0.8)';
+  ctx.textAlign = 'left';
+  ctx.fillText('INTENSITY', LX - 4, LY - 10);
+
+  // Gradient bar — draw LH pixels tall, each coloured by intensityToRGB
+  for (let i = 0; i < LH; i++) {
+    const v = 1 - i / (LH - 1);   // 1 at top (loud), 0 at bottom (silent)
+    const [r, g, b] = intensityToRGB(v);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(LX, LY + i, LW, 1);
+  }
+
+  // Border around bar
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth   = 0.5;
+  ctx.strokeRect(LX, LY, LW, LH);
+
+  // Labels at key stops
+  const labels = [
+    { v: 1.00, label: 'Loud'    },
+    { v: 0.70, label: '–'       },
+    { v: 0.45, label: 'Mid'     },
+    { v: 0.20, label: '–'       },
+    { v: 0.00, label: 'Silent'  },
+  ];
+
+  ctx.font      = '8px "Courier Prime", monospace';
+  ctx.textAlign = 'left';
+
+  for (const lbl of labels) {
+    const y = LY + (1 - lbl.v) * LH;
+    // Tick
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth   = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(LX + LW, y);
+    ctx.lineTo(LX + LW + 4, y);
+    ctx.stroke();
+    // Label
+    ctx.fillStyle = 'rgba(180,180,180,0.75)';
+    ctx.fillText(lbl.label, LX + LW + 7, y + 3);
+  }
+
+  ctx.restore();
+}
+
+// ── Render loop ───────────────────────────────────────────────────
+function render() {
+  if (!running) return;
+  raf = requestAnimationFrame(render);
+  time++;
+
+  const bufLen = analyser.frequencyBinCount;
+  analyser.getByteFrequencyData(dataArray);
+
+  const col = buildColumn(dataArray, bufLen);
+  advanceHistory(col);
+
+  // Blit offscreen buffer to main canvas
+  offCtx.putImageData(offData, 0, 0);
+  ctx.drawImage(offCanvas, 0, 0);
+
+  // Y axis frequency labels
+  drawYAxis();
+
+  // Color + intensity legend
+  drawLegend();
+
+  // Subtle centre line marker
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(CX, 0);
+  ctx.lineTo(CX, H);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── Start / Stop ──────────────────────────────────────────────────
+async function startWithStream(mediaStream, sourceLabel) {
+  try {
+    // Grab only the audio tracks — getDisplayMedia may include video
+    const audioTracks = mediaStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      alert('No audio track found. Make sure to tick "Share tab audio" or "Share system audio" in the picker.');
+      mediaStream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    stream = new MediaStream(audioTracks);
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.82;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+
+    running = true;
+    initBuffers();
+    document.getElementById('ui').classList.add('hidden');
+    document.getElementById('stopBtn').style.display = 'block';
+    const lbl = document.getElementById('sourceLabel');
+    lbl.textContent = '● ' + sourceLabel;
+    lbl.style.display = 'block';
+    render();
+  } catch(e) {
+    alert('Could not start audio: ' + e.message);
+  }
+}
+
+async function startMic() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    await startWithStream(s, 'Microphone');
+  } catch(e) {
+    alert('Microphone access denied.');
+  }
+}
+
+async function startSystem() {
+  try {
+    // getDisplayMedia captures tab or system audio
+    // The user must tick "Share audio" in the Chrome picker
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        sampleRate: 48000,
+      },
+      video: true,   // Chrome requires video:true for getDisplayMedia, we discard it
+    });
+    // Stop any video tracks immediately — we only want audio
+    s.getVideoTracks().forEach(t => t.stop());
+    await startWithStream(s, 'System Audio');
+  } catch(e) {
+    if (e.name !== 'AbortError' && e.name !== 'NotAllowedError') {
+      alert('Could not capture system audio: ' + e.message);
+    }
+  }
+}
+
+function stop() {
+  running = false;
+  cancelAnimationFrame(raf);
+  if (stream)   stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  document.getElementById('ui').classList.remove('hidden');
+  document.getElementById('stopBtn').style.display = 'none';
+  document.getElementById('sourceLabel').style.display = 'none';
+}
+
+document.getElementById('startBtn').addEventListener('click', startMic);
+document.getElementById('sysBtn').addEventListener('click', startSystem);
+document.getElementById('stopBtn').addEventListener('click', stop);
+</script>
+</body>
+</html>

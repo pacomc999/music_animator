@@ -272,9 +272,12 @@ function buildColumn(dataArray, bufLen) {
 
   // Step 1: build a smooth magnitude array in linear bin space.
   // Apply a Gaussian blur across bins so adjacent bins blend into each other.
+  // Blur radius is adaptive: small at low-frequency bins (where bins are wide
+  // on screen and a fixed radius causes heavy smearing), larger at high-frequency
+  // bins (where the log scale squashes bins together and blur fills the gaps).
   const mag = new Float32Array(bufLen);
-  const BLUR_R = 3;
   for (let i = 0; i < bufLen; i++) {
+    const BLUR_R = Math.max(1, Math.round((i / bufLen) * 4));
     let sum = 0, wsum = 0;
     for (let k = -BLUR_R; k <= BLUR_R; k++) {
       const j = i + k;
@@ -338,9 +341,20 @@ function buildColumn(dataArray, bufLen) {
 
   // Step 3: vertical Gaussian blur over the column pixels to smooth
   // remaining discontinuities caused by the log mapping squashing high freqs.
-  const VBLUR = 2;
+  // Blur radius is adaptive: 0 at low frequencies (where pixels are already
+  // spread wide and blur would smear a precise tone), up to 3 at high
+  // frequencies where the log scale squashes bins into very few pixels.
   const smoothed = new Uint8ClampedArray(H * 3);
   for (let y = 0; y < H; y++) {
+    const tFreq = 1 - y / H;  // 0 = bottom (low freq), 1 = top (high freq)
+    const VBLUR = Math.round(tFreq * 3);  // 0 at lows, 3 at highs
+    if (VBLUR === 0) {
+      // No blur — copy pixel directly
+      smoothed[y*3]   = col[y*3];
+      smoothed[y*3+1] = col[y*3+1];
+      smoothed[y*3+2] = col[y*3+2];
+      continue;
+    }
     let rS=0, gS=0, bS=0, wS=0;
     for (let k = -VBLUR; k <= VBLUR; k++) {
       const yy = y + k;

@@ -88,8 +88,16 @@
   #gainSlider::-moz-range-thumb {
     width:10px; height:10px; background:#bbb; border-radius:50%; border:none;
   }
+  .p-btn {
+    font-family:'Courier Prime',monospace;
+    font-size:9px; letter-spacing:.25em; text-transform:uppercase;
+    padding:5px 14px; background:transparent;
+    border:1px solid #333; color:#555; cursor:pointer; transition:all .2s;
+  }
+  .p-btn:hover  { border-color:#888; color:#aaa; }
+  .p-btn.active { border-color:#bbb; color:#ddd; }
   #settingsBox .s-hint {
-    font-size:8px; letter-spacing:.3em; text-transform:uppercase; color:#444;
+    font-size:9px; letter-spacing:.35em; text-transform:uppercase; color:#777;
   }
 </style>
 </head>
@@ -115,6 +123,14 @@
       <input type="range" id="gainSlider" min="0.2" max="4" step="0.05" value="1">
       <div class="s-label">
         <span>0.2</span><span>4.0</span>
+      </div>
+    </div>
+    <div class="s-row">
+      <div class="s-label">Palette</div>
+      <div id="paletteButtons" style="display:flex; gap:10px; margin-top:2px;">
+        <button class="p-btn active" data-palette="blue">Blue</button>
+        <button class="p-btn"        data-palette="yellow">Yellow</button>
+        <button class="p-btn"        data-palette="red">Red</button>
       </div>
     </div>
     <p class="s-hint">press S to close</p>
@@ -148,6 +164,32 @@ let running = false, raf, time = 0;
 let audioCtx, analyser, dataArray, stream;
 let gain = 1;
 let settingsOpen = false;
+
+// ── Colour palettes ───────────────────────────────────────────────
+const PALETTES = {
+  blue: [
+    { t:0.00, r:0,   g:0,   b:0   },
+    { t:0.20, r:0,   g:20,  b:120 },
+    { t:0.45, r:0,   g:180, b:200 },
+    { t:0.70, r:180, g:230, b:255 },
+    { t:1.00, r:255, g:255, b:255 },
+  ],
+  yellow: [
+    { t:0.00, r:0,   g:0,   b:0   },
+    { t:0.20, r:60,  g:50,  b:0   },
+    { t:0.45, r:220, g:200, b:0   },
+    { t:0.70, r:255, g:245, b:140 },
+    { t:1.00, r:255, g:255, b:255 },
+  ],
+  red: [
+    { t:0.00, r:0,   g:0,   b:0   },
+    { t:0.20, r:80,  g:5,   b:5   },
+    { t:0.45, r:210, g:0,   b:0   },
+    { t:0.70, r:255, g:160, b:130 },
+    { t:1.00, r:255, g:255, b:255 },
+  ],
+};
+let currentPalette = PALETTES.blue;
 
 // Off-screen buffer — we maintain the full pixel history here
 // and blit to main canvas each frame
@@ -183,13 +225,7 @@ function intensityToRGB(v) {
   // 0.45 → cyan-teal    (0,180,200)
   // 0.70 → bright white-blue (180,230,255)
   // 1.00 → pure white   (255,255,255)
-  const stops = [
-    { t:0.00, r:0,   g:0,   b:0   },
-    { t:0.20, r:0,   g:20,  b:120 },
-    { t:0.45, r:0,   g:180, b:200 },
-    { t:0.70, r:180, g:230, b:255 },
-    { t:1.00, r:255, g:255, b:255 },
-  ];
+  const stops = currentPalette;
 
   v = Math.max(0, Math.min(1, v));
   let i = 0;
@@ -631,6 +667,15 @@ const gainValue     = document.getElementById('gainValue');
 gainSlider.addEventListener('input', () => {
   gain = parseFloat(gainSlider.value);
   gainValue.textContent = gain.toFixed(2);
+});
+
+// ── Palette selector ─────────────────────────────────────────────
+document.querySelectorAll('.p-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentPalette = PALETTES[btn.dataset.palette];
+    document.querySelectorAll('.p-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
 });
 
 document.addEventListener('keydown', e => {

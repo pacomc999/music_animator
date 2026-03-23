@@ -24,18 +24,18 @@
   }
   .sub {
     font-family:'Courier Prime',monospace;
-    font-size:10px; letter-spacing:.35em;
-    text-transform:uppercase; color:#333;
+    font-size:11px; letter-spacing:.35em;
+    text-transform:uppercase; color:#999;
   }
   #startBtn, #sysBtn {
     font-family:'Courier Prime',monospace; font-size:11px;
     letter-spacing:.3em; text-transform:uppercase;
-    padding:13px 40px; background:transparent;
-    border:1px solid #555; color:#777; cursor:pointer; transition:all .3s;
+    padding:13px 40px; background:#444;
+    border:1px solid #555; color:#eee; cursor:pointer; transition:all .3s;
     display:block; width:260px; text-align:center;
   }
-  #startBtn:hover, #sysBtn:hover { border-color:#fff; color:#fff; }
-  #sysBtn { border-color:#333; color:#444; }
+  #startBtn:hover, #sysBtn:hover { background:#666; border-color:#888; color:#fff; }
+  #sysBtn { background:#333; border-color:#444; color:#ccc; }
   #stopBtn {
     position:fixed; top:22px; right:22px;
     font-family:'Courier Prime',monospace; font-size:9px;
@@ -67,16 +67,16 @@
     flex-direction:column; gap:28px;
   }
   #settingsBox .s-title {
-    font-size:11px; letter-spacing:.4em; text-transform:uppercase; color:#999;
+    font-size:11px; letter-spacing:.4em; text-transform:uppercase; color:#fff;
   }
   #settingsBox .s-row {
     display:flex; flex-direction:column; gap:10px;
   }
   #settingsBox .s-label {
-    font-size:9px; letter-spacing:.35em; text-transform:uppercase; color:#777;
+    font-size:11px; letter-spacing:.35em; text-transform:uppercase; color:#fff;
     display:flex; justify-content:space-between; align-items:baseline;
   }
-  #settingsBox .s-label span { color:#ddd; font-size:13px; letter-spacing:.1em; }
+  #settingsBox .s-label span { color:#fff; font-size:13px; letter-spacing:.1em; }
   #gainSlider {
     -webkit-appearance:none; appearance:none;
     width:100%; height:1px; background:#555; outline:none; cursor:pointer;
@@ -90,27 +90,43 @@
   }
   .p-btn {
     font-family:'Courier Prime',monospace;
-    font-size:9px; letter-spacing:.25em; text-transform:uppercase;
+    font-size:11px; letter-spacing:.25em; text-transform:uppercase;
     padding:5px 14px; background:transparent;
-    border:1px solid #333; color:#555; cursor:pointer; transition:all .2s;
+    border:1px solid #555; color:#aaa; cursor:pointer; transition:all .2s;
   }
-  .p-btn:hover  { border-color:#888; color:#aaa; }
-  .p-btn.active { border-color:#bbb; color:#ddd; }
+  .p-btn:hover  { border-color:#fff; color:#fff; }
+  .p-btn.active { border-color:#fff; color:#fff; }
   #settingsBox .s-hint {
-    font-size:9px; letter-spacing:.35em; text-transform:uppercase; color:#777;
+    font-size:11px; letter-spacing:.35em; text-transform:uppercase; color:#fff;
   }
+  .freq-inputs { display:flex; gap:10px; }
+  .freq-inputs input {
+    font-family:'Courier Prime',monospace; font-size:11px;
+    letter-spacing:.1em; color:#fff; background:transparent;
+    border:1px solid #555; padding:5px 8px; width:100%;
+    outline:none; text-align:center; transition:border-color .2s;
+  }
+  .freq-inputs input:focus { border-color:#aaa; }
+  #menuBtn {
+    font-family:'Courier Prime',monospace; font-size:11px;
+    letter-spacing:.3em; text-transform:uppercase;
+    padding:10px 0; background:#333;
+    border:1px solid #555; color:#eee; cursor:pointer; transition:all .3s;
+    width:100%; text-align:center;
+  }
+  #menuBtn:hover { background:#555; border-color:#888; color:#fff; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="ui">
   <h1>SPECTRUM</h1>
-  <p class="sub">Audio Reactive</p>
   <button id="startBtn">🎙 Microphone</button>
   <button id="sysBtn" style="margin-top:-4px;">💻 System / Tab Audio</button>
-  <p class="sub" style="font-size:8px;color:#1a1a1a;max-width:280px;text-align:center;line-height:2.2;">
+  <p class="sub" style="font-size:11px;color:#fff;max-width:280px;text-align:center;line-height:2.2;">
     System audio: share screen → tick "Share tab audio" or "Share system audio"
   </p>
+  <p class="sub" style="font-size:11px;color:#fff;margin-top:8px;letter-spacing:.3em;">Press S for settings</p>
 </div>
 <button id="stopBtn">✕ Stop</button>
 <div id="sourceLabel"></div>
@@ -133,7 +149,15 @@
         <button class="p-btn"        data-palette="red">Red</button>
       </div>
     </div>
+    <div class="s-row">
+      <div class="s-label">Frequency range <span>Hz</span></div>
+      <div class="freq-inputs">
+        <input type="number" id="freqMinInput" min="20" max="2000" step="10" value="20" title="Min frequency">
+        <input type="number" id="freqMaxInput" min="1000" max="20000" step="100" value="20000" title="Max frequency">
+      </div>
+    </div>
     <p class="s-hint">press S to close</p>
+    <button id="menuBtn">↩ Back to menu</button>
   </div>
 </div>
 
@@ -163,6 +187,7 @@ let W, H, CX;
 let running = false, raf, time = 0;
 let audioCtx, analyser, dataArray, stream;
 let gain = 1;
+let freqMin = 20, freqMax = 20000;
 let settingsOpen = false;
 
 // ── Colour palettes ───────────────────────────────────────────────
@@ -245,9 +270,9 @@ function intensityToRGB(v) {
 // so the full spectrum is visually balanced.
 // Returns a multiplier 0..1 for a given frequency in Hz.
 function freqWeight(hz) {
-  const logMin = Math.log10(20);
-  const logMax = Math.log10(20000);
-  const logHz  = Math.log10(Math.max(20, hz));
+  const logMin = Math.log10(freqMin);
+  const logMax = Math.log10(freqMax);
+  const logHz  = Math.log10(Math.max(freqMin, hz));
   const t = (logHz - logMin) / (logMax - logMin);
   // Steeper power curve: lows pulled down more aggressively
   // t=0   (20 Hz)    → ~0.00
@@ -267,8 +292,8 @@ function buildColumn(dataArray, bufLen) {
   const col    = new Uint8ClampedArray(H * 3);
   const nyq    = audioCtx.sampleRate / 2;
   const fpb    = nyq / bufLen;
-  const logMin = Math.log10(20);
-  const logMax = Math.log10(20000);
+  const logMin = Math.log10(freqMin);
+  const logMax = Math.log10(freqMax);
 
   // Step 1: build a smooth magnitude array in linear bin space.
   // Apply a Gaussian blur across bins so adjacent bins blend into each other.
@@ -326,8 +351,8 @@ function buildColumn(dataArray, bufLen) {
 
     // Additional brightness boost for highs — apply gamma < 1 above 2kHz
     // This makes the high-frequency detail pop without touching the lows
-    const logHz = Math.log10(Math.max(20, hz));
-    const tHz   = (logHz - Math.log10(20)) / (Math.log10(20000) - Math.log10(20));
+    const logHz = Math.log10(Math.max(freqMin, hz));
+    const tHz   = (logHz - Math.log10(freqMin)) / (Math.log10(freqMax) - Math.log10(freqMin));
     // Gamma interpolates from 1.0 (no boost at lows) → 0.55 (strong boost at highs)
     const gamma = 1.0 - tHz * 0.45;
     val = Math.pow(Math.max(0, val), gamma);
@@ -455,14 +480,14 @@ const FREQ_MARKS = [
 ];
 
 function drawYAxis() {
-  const logMin = Math.log10(20);
-  const logMax = Math.log10(20000);
+  const logMin = Math.log10(freqMin);
+  const logMax = Math.log10(freqMax);
 
   ctx.save();
   ctx.font      = '10px "Courier Prime", monospace';
   ctx.textAlign = 'left';
 
-  for (const mark of FREQ_MARKS) {
+  for (const mark of FREQ_MARKS.filter(m => m.hz >= freqMin && m.hz <= freqMax)) {
     const t = (Math.log10(mark.hz) - logMin) / (logMax - logMin);
     const y = Math.round((1 - t) * H);
 
@@ -681,6 +706,24 @@ const gainValue     = document.getElementById('gainValue');
 gainSlider.addEventListener('input', () => {
   gain = parseFloat(gainSlider.value);
   gainValue.textContent = gain.toFixed(2);
+});
+
+document.getElementById('menuBtn').addEventListener('click', () => {
+  settingsOpen = false;
+  settingsPanel.classList.remove('visible');
+  stop();
+});
+
+// ── Frequency range inputs ────────────────────────────────────────
+document.getElementById('freqMinInput').addEventListener('change', e => {
+  const val = parseInt(e.target.value);
+  if (val >= 20 && val < freqMax) freqMin = val;
+  else e.target.value = freqMin;
+});
+document.getElementById('freqMaxInput').addEventListener('change', e => {
+  const val = parseInt(e.target.value);
+  if (val <= 20000 && val > freqMin) freqMax = val;
+  else e.target.value = freqMax;
 });
 
 // ── Palette selector ─────────────────────────────────────────────

@@ -115,6 +115,69 @@
     width:100%; text-align:center;
   }
   #menuBtn:hover { background:#555; border-color:#888; color:#fff; }
+  #infoBtn {
+    font-family:'Courier Prime',monospace; font-size:11px;
+    letter-spacing:.3em; text-transform:uppercase;
+    padding:8px 30px; background:transparent;
+    border:1px solid #333; color:#666; cursor:pointer; transition:all .3s;
+    margin-top:-8px;
+  }
+  #infoBtn:hover { border-color:#666; color:#aaa; }
+  #infoBox {
+    position:fixed; top:0; right:-360px; width:320px; height:100vh;
+    background:#2a2a2a; border-left:1px solid #444;
+    padding:40px 28px; z-index:25;
+    font-family:'Courier Prime',monospace;
+    display:flex; flex-direction:column; gap:18px;
+    overflow-y:auto;
+    transition:right .35s ease;
+  }
+  #infoBox.visible { right:0; }
+  #infoBox h2 {
+    font-size:11px; letter-spacing:.4em; text-transform:uppercase; color:#fff;
+  }
+  #infoBox p {
+    font-size:11px; color:#ccc; line-height:1.9; letter-spacing:.03em;
+  }
+  #infoBox strong { color:#fff; }
+  #audioModal {
+    position:fixed; inset:0; background:rgba(0,0,0,.7);
+    display:flex; align-items:center; justify-content:center;
+    z-index:50; opacity:0; pointer-events:none; transition:opacity .25s;
+  }
+  #audioModal.visible { opacity:1; pointer-events:all; }
+  #audioModalBox {
+    font-family:'Courier Prime',monospace;
+    background:#2a2a2a; border:1px solid #555;
+    padding:40px 48px; max-width:400px; width:90%;
+    display:flex; flex-direction:column; gap:20px;
+  }
+  #audioModalBox h2 {
+    font-size:11px; letter-spacing:.4em; text-transform:uppercase; color:#fff;
+  }
+  #audioModalBox p {
+    font-size:11px; color:#ccc; line-height:1.9; letter-spacing:.03em;
+  }
+  #audioModalBox ol {
+    font-size:11px; color:#ccc; line-height:2.2; letter-spacing:.03em;
+    padding-left:16px;
+  }
+  #audioModalBox ol li strong { color:#fff; }
+  #audioModalContinue {
+    font-family:'Courier Prime',monospace; font-size:11px;
+    letter-spacing:.3em; text-transform:uppercase;
+    padding:13px 0; background:#444;
+    border:1px solid #555; color:#eee; cursor:pointer; transition:all .3s;
+    text-align:center;
+  }
+  #audioModalContinue:hover { background:#666; border-color:#888; color:#fff; }
+  #audioModalCancel {
+    font-family:'Courier Prime',monospace; font-size:10px;
+    letter-spacing:.25em; text-transform:uppercase;
+    color:#555; background:none; border:none; cursor:pointer;
+    text-align:center; transition:color .2s;
+  }
+  #audioModalCancel:hover { color:#aaa; }
 </style>
 </head>
 <body>
@@ -123,11 +186,31 @@
   <h1>SPECTRUM</h1>
   <button id="startBtn">🎙 Microphone</button>
   <button id="sysBtn" style="margin-top:-4px;">💻 System / Tab Audio</button>
-  <p class="sub" style="font-size:11px;color:#fff;max-width:280px;text-align:center;line-height:2.2;">
-    System audio: share screen → tick "Share tab audio" or "Share system audio"
-  </p>
   <p class="sub" style="font-size:11px;color:#fff;margin-top:8px;letter-spacing:.3em;">Press S for settings</p>
-  <p class="sub" style="font-size:10px;color:#888;margin-top:16px;letter-spacing:.1em;">Created by Francisco Martinez Checa - March 2026</p>
+  <button id="infoBtn">Info</button>
+</div>
+<div id="audioModal">
+  <div id="audioModalBox">
+    <h2>Before you continue</h2>
+    <p>When the browser asks you to share your screen, make sure to tick <strong>"Share tab audio"</strong> or <strong>"Share system audio"</strong> — otherwise no sound will be captured.</p>
+    <ol>
+      <li>Click <strong>Continue</strong> below</li>
+      <li>Pick the tab or screen you want to share</li>
+      <li>Tick <strong>"Share tab audio"</strong> ✓</li>
+      <li>Click <strong>Share</strong></li>
+    </ol>
+    <button id="audioModalContinue">Got it — Continue</button>
+    <button id="audioModalCancel">Cancel</button>
+  </div>
+</div>
+<div id="infoBox">
+  <h2>About Spectrum</h2>
+  <p>SPECTRUM is a real-time audio visualizer that runs in your browser. It captures audio from your microphone or your computer and analyzes it by frequency.</p>
+  <p>The vertical axis shows the full frequency spectrum — low frequencies at the bottom, high frequencies at the top. The height of each colored bar tells you how loud that frequency is right now.</p>
+  <p>As time passes, the visualization scrolls sideways — looking left you can see the recent history of your audio, like a window moving through time. This makes it easy to spot patterns, beats, and tonal changes as they happen.</p>
+  <p><strong>Microphone</strong> — captures sound from your mic.<br><br>
+  <strong>System / Tab Audio</strong> — captures audio playing on your computer.</p>
+  <p>No data is recorded or sent anywhere. Everything runs locally in your browser.</p>
 </div>
 <button id="stopBtn">✕ Stop</button>
 <div id="sourceLabel"></div>
@@ -696,8 +779,28 @@ function stop() {
 }
 
 document.getElementById('startBtn').addEventListener('click', startMic);
-document.getElementById('sysBtn').addEventListener('click', startSystem);
 document.getElementById('stopBtn').addEventListener('click', stop);
+
+// ── System audio modal ─────────────────────────────────────────────
+const audioModal = document.getElementById('audioModal');
+document.getElementById('sysBtn').addEventListener('click', () => {
+  audioModal.classList.add('visible');
+});
+document.getElementById('audioModalContinue').addEventListener('click', () => {
+  audioModal.classList.remove('visible');
+  startSystem();
+});
+document.getElementById('audioModalCancel').addEventListener('click', () => {
+  audioModal.classList.remove('visible');
+});
+
+// ── Info toggle ────────────────────────────────────────────────────
+document.getElementById('infoBtn').addEventListener('click', () => {
+  const box = document.getElementById('infoBox');
+  const btn = document.getElementById('infoBtn');
+  const visible = box.classList.toggle('visible');
+  btn.textContent = visible ? 'Close' : 'Info';
+});
 
 // ── Settings panel ────────────────────────────────────────────────
 const settingsPanel = document.getElementById('settingsPanel');

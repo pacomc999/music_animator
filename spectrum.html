@@ -35,6 +35,25 @@
     display:block; width:260px; text-align:center;
   }
   #startBtn:hover, #sysBtn:hover { background:#666; border-color:#888; color:#fff; }
+  #credits {
+    text-align:center; margin-top:96px; display:flex;
+    flex-direction:column; gap:2px;
+  }
+  .credits-label {
+    font-family:'Courier Prime',monospace;
+    font-size:11px; letter-spacing:.35em;
+    text-transform:uppercase; color:#666;
+  }
+  .credits-names {
+    font-family:'Bebas Neue',sans-serif;
+    font-size:clamp(16px,2.5vw,32px);
+    letter-spacing:.2em; color:#888;
+  }
+  .credits-date {
+    font-family:'Courier Prime',monospace;
+    font-size:10px; letter-spacing:.35em;
+    text-transform:uppercase; color:#555;
+  }
   #sysBtn { background:#333; border-color:#444; color:#ccc; }
   #stopBtn {
     position:fixed; top:22px; right:22px;
@@ -188,6 +207,11 @@
   <button id="sysBtn" style="margin-top:-4px;">💻 System / Tab Audio</button>
   <p class="sub" style="font-size:11px;color:#fff;margin-top:8px;letter-spacing:.3em;">Press S for settings</p>
   <button id="infoBtn">Info</button>
+  <div id="credits">
+    <p class="credits-label">Created by</p>
+    <p class="credits-names">Francisco Martinez and Agnese Sacchi</p>
+    <p class="credits-date">March 2026</p>
+  </div>
 </div>
 <div id="audioModal">
   <div id="audioModalBox">
